@@ -5,8 +5,6 @@
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2014-2015 Artem Y. Polyakov <artpol84@gmail.com>.
  *                         All rights reserved.
- * Copyright (c) 2015      Mellanox Technologies, Inc.
- *                         All rights reserved.
  * $COPYRIGHT$
  *
  * Additional copyrights may follow
@@ -1353,6 +1351,112 @@ pmix_status_t pmix_server_connect(pmix_server_caddy_t *cd,
     return rc;
 }
 
+pmix_status_t pmix_server_register_events(pmix_peer_t *peer,
+                                          pmix_buffer_t *buf,
+                                          pmix_op_cbfunc_t cbfunc,
+                                          void *cbdata)
+{
+    int32_t cnt;
+    pmix_status_t rc;
+    pmix_info_t *info = NULL;
+    size_t ninfo;
+    pmix_regevents_info_t *reginfo;
+
+    pmix_output_verbose(2, pmix_globals.debug_output,
+                        "recvd register events");
+
+    if (NULL == pmix_host_server.register_events) {
+        return PMIX_ERR_NOT_SUPPORTED;
+    }
+    /* unpack the number of info objects */
+    cnt=1;
+    if (PMIX_SUCCESS != (rc = pmix_bfrop.unpack(buf, &ninfo, &cnt, PMIX_SIZE))) {
+        PMIX_ERROR_LOG(rc);
+        return rc;
+    }
+    /* unpack the array of info objects */
+    if (0 < ninfo) {
+        PMIX_INFO_CREATE(info, ninfo);
+        cnt=ninfo;
+        if (PMIX_SUCCESS != (rc = pmix_bfrop.unpack(buf, info, &cnt, PMIX_INFO))) {
+            PMIX_ERROR_LOG(rc);
+            goto cleanup;
+        }
+    }
+    /* store the event registration info so we can call the registered
+       client when the server notifies the event */
+    reginfo = PMIX_NEW(pmix_regevents_info_t);
+    PMIX_INFO_CREATE (reginfo->info, ninfo);
+    reginfo->ninfo = ninfo;
+    for (cnt=0; cnt < ninfo; cnt++) {
+        memcpy(reginfo->info[cnt].key, info[cnt].key, PMIX_MAX_KEYLEN);
+        pmix_value_xfer(&reginfo->info[cnt].value, &info[cnt].value);
+    }
+    PMIX_RETAIN(peer);
+    reginfo->peer = peer;
+    pmix_list_append(&pmix_server_globals.client_eventregs, &reginfo->super);
+    /* call the local server */
+    if(PMIX_SUCCESS != (rc = pmix_host_server.register_events(reginfo->info,
+                             reginfo->ninfo, cbfunc, cbdata)))
+    {
+         /* call the callback fn with error status */
+        regevents_cbfunc(rc, cbdata);
+    }
+cleanup:
+    PMIX_INFO_FREE(info, ninfo);
+    return rc;
+}
+
+pmix_status_t pmix_server_deregister_events(pmix_peer_t *peer,
+                                          pmix_buffer_t *buf,
+                                          pmix_op_cbfunc_t cbfunc,
+                                          void *cbdata)
+{
+    int32_t cnt;
+    pmix_status_t rc;
+    pmix_info_t *info = NULL;
+    size_t ninfo;
+    pmix_regevents_info_t *reginfo = NULL;
+    pmix_regevents_info_t *reginfo_next;
+    pmix_output_verbose(2, pmix_globals.debug_output,
+                        "recvd deregister events");
+
+    if (NULL == pmix_host_server.register_events) {
+        return PMIX_ERR_NOT_SUPPORTED;
+    }
+    /* unpack the number of info objects */
+    cnt=1;
+    if (PMIX_SUCCESS != (rc = pmix_bfrop.unpack(buf, &ninfo, &cnt, PMIX_SIZE))) {
+        PMIX_ERROR_LOG(rc);
+        return rc;
+    }
+    /* unpack the array of info objects */
+    if (0 < ninfo) {
+        PMIX_INFO_CREATE(info, ninfo);
+        cnt=ninfo;
+        if (PMIX_SUCCESS != (rc = pmix_bfrop.unpack(buf, info, &cnt, PMIX_INFO))) {
+            PMIX_ERROR_LOG(rc);
+            goto cleanup;
+        }
+    }
+    /* delete the stored event registration info */
+    PMIX_LIST_FOREACH_SAFE(reginfo, reginfo_next,
+                            &pmix_server_globals.client_eventregs, pmix_regevents_info_t) {
+        /* TO DO: For now assume there is one reginfo per peer, we need to revisit this
+           to match info keys too, inorder to multiple register events requests per process */
+        if(reginfo->peer == peer) {
+            pmix_list_remove_item (&pmix_server_globals.client_eventregs,  &reginfo->super);
+            PMIX_RELEASE(reginfo);
+            break;
+        }
+    }
+    /* call the local server */
+    rc = pmix_host_server.deregister_events(info, ninfo, cbfunc, cbdata);
+
+cleanup:
+    PMIX_INFO_FREE(info, ninfo);
+    return rc;
+}
 // instance server library classes
 static void tcon(pmix_server_trkr_t *t)
 {
@@ -1494,3 +1598,18 @@ PMIX_CLASS_INSTANCE(pmix_dmdx_local_t,
 PMIX_CLASS_INSTANCE(pmix_pending_connection_t,
                     pmix_object_t,
                     NULL, NULL);
+static void regcon(pmix_regevents_info_t *p)
+{
+    p->peer = NULL;
+    p->info = NULL;
+    p->ninfo = 0;
+}
+static void regdes(pmix_regevents_info_t *p)
+{
+    if(NULL != p->peer)
+        PMIX_RELEASE(p->peer);
+    PMIX_INFO_FREE(p->info, p->ninfo);
+}
+PMIX_CLASS_INSTANCE(pmix_regevents_info_t,
+                    pmix_list_item_t,
+                    regcon, regdes);

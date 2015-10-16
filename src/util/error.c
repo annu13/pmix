@@ -135,7 +135,88 @@ void pmix_errhandler_invoke(pmix_status_t status,
                             pmix_proc_t procs[], size_t nprocs,
                             pmix_info_t info[], size_t ninfo)
 {
-    if (NULL != pmix_globals.errhandler) {
-        pmix_globals.errhandler(status, procs, nprocs, info, ninfo);
+    /* We need to parse thru each registered handler and determine
+       which one to call for that error */
+    /*if (NULL != pmix_globals.errregs[0].errhandler) {
+        pmix_globals.errregs[0].errhandler(status, procs, nprocs, info, ninfo);
+    }*/
+}
+
+pmix_status_t pmix_lookup_errhandler(pmix_notification_fn_t err,
+                                     int *index)
+{
+    int i, rc = PMIX_ERR_NOT_FOUND;
+    pmix_error_reg_info_t *errreg;
+    for (i = 0; i < pmix_pointer_array_get_size(&pmix_globals.errregs) ; i++) {
+        errreg = (pmix_error_reg_info_t*) pmix_pointer_array_get_item (&pmix_globals.errregs, i);
+        if(err == errreg->errhandler) {
+            *index = i;
+            rc = PMIX_SUCCESS;
+            break;
+        }
+    }
+    return rc;
+}
+
+pmix_status_t pmix_add_errhandler(pmix_notification_fn_t err,
+                                  pmix_info_t *info, int ninfo,
+                                  int *index)
+{
+    int i, rc = PMIX_SUCCESS;
+    pmix_error_reg_info_t *errreg = PMIX_NEW(pmix_error_reg_info_t);
+    errreg->errhandler = err;
+    errreg->ninfo = ninfo;
+    PMIX_INFO_CREATE(errreg->info, ninfo);
+    for (i=0; i < ninfo; i++) {
+        memcpy(errreg->info[i].key, info[i].key, PMIX_MAX_KEYLEN);
+        pmix_value_xfer(&errreg->info[i].value, &info[i].value);
+    }
+    *index = pmix_pointer_array_add (&pmix_globals.errregs, errreg);
+    if (-1 == *index)
+        rc = PMIX_ERROR;
+    return rc;
+}
+
+pmix_status_t pmix_remove_errhandler(int errhandler_ref)
+{
+    int i, rc = PMIX_SUCCESS;
+    pmix_error_reg_info_t *errreg;
+    errreg = (pmix_error_reg_info_t*) pmix_pointer_array_get_item (&pmix_globals.errregs, errhandler_ref);
+    if (NULL != errreg)
+        PMIX_RELEASE(errreg);
+    else
+        rc = PMIX_ERR_NOT_FOUND;
+    return rc;
+}
+
+void pmix_get_errorgroup ( pmix_status_t status, char *pmix_error_group)
+{
+    switch(status) {
+        case PMIX_ERR_UNREACH:
+        case PMIX_ERR_COMM_FAILURE:
+        case PMIX_ERR_SERVER:
+        case PMIX_ERR_SERVER_NOT_AVAIL:
+            strcpy(pmix_error_group, PMIX_ERR_GROUP_COMM_FAILURE);
+            break;
+        case PMIX_ERR_OUT_OF_RESOURCE:
+        case PMIX_ERR_RESOURCE_BUSY:
+        case PMIX_ERR_NOMEM:
+            strcpy(pmix_error_group, PMIX_ERR_GROUP_RESOURCE);
+            break;
+        case PMIX_ERR_PROC_MIGRATING:
+        case PMIX_ERR_PROC_CHECKPOINTING:
+        case PMIX_ERR_PROC_RESTART:
+            strcpy(pmix_error_group, PMIX_ERR_GROUP_MIGRATION);
+            break;
+        case PMIX_ERR_PROC_ABORT_IN_PROGRESS:
+        case PMIX_ERR_PROC_REQUESTED_ABORT:
+        case PMIX_ERR_PROC_ABORTED:
+            strcpy(pmix_error_group, PMIX_ERR_GROUP_ABORT);
+            break;
+        default:
+            strcpy(pmix_error_group, PMIX_ERR_GROUP_GENERAL);
     }
 }
+
+
+

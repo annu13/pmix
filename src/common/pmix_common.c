@@ -23,12 +23,26 @@ void PMIx_Register_errhandler(pmix_info_t info[], size_t ninfo,
                               pmix_errhandler_reg_cbfunc_t cbfunc,
                               void *cbdata)
 {
-    /* common err handler registration to be added */
+    /* common err handler registration */
+    if(pmix_globals.server)  {
+        /* PMIX server: store the error handler, process info keys and call
+                    cbfunc with reference to the errhandler */
+        pmix_server_register_errhandler(info, ninfo,
+                                        errhandler,
+                                        cbfunc,cbdata);
+    }
+    else {
+        /* PMIX client: store the error handler, process info keys & call pmix_server_register_for_events,
+                    and call cbfunc with reference to the errhandler */
+        pmix_client_register_errhandler(info, ninfo,
+                                        errhandler,
+                                        cbfunc, cbdata);
+    }
 }
 
 void PMIx_Deregister_errhandler(int errhandler_ref,
-                                 pmix_op_cbfunc_t cbfunc,
-                                 void *cbdata)
+                                pmix_op_cbfunc_t cbfunc,
+                                void *cbdata)
 {
     /* common err handler deregistration goes here */
 }
@@ -39,6 +53,15 @@ pmix_status_t PMIx_Notify_error(pmix_status_t status,
                                 pmix_info_t info[], size_t ninfo,
                                 pmix_op_cbfunc_t cbfunc, void *cbdata)
 {
-    /* common err notify goes here */
-   return PMIX_SUCCESS;
+    int rc;
+    if(pmix_globals.server) {
+        rc = pmix_server_notify_error (status, procs[], nprocs, error_procs,
+                                       error_nprocs, info, ninfo,
+                                        cbfunc, cbdata);
+    } else {
+        rc = pmix_client_notify_error (status, procs[], nprocs, error_procs,
+                                       error_nprocs, info, ninfo,
+                                       cbfunc, cbdata);
+    }
+    return rc;
 }

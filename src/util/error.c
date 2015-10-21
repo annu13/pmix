@@ -153,8 +153,8 @@ void pmix_errhandler_invoke(pmix_status_t status,
     /* We need to parse thru each registered handler and determine
        which one to call for the specific error */
     int matched_errregs[PMIX_MAX_ERROR_REGISTRATIONS];
-    int nmatched = 0;
-    unsigned int i,j,k;
+    int i, nmatched = 0;
+    unsigned int j,k;
     bool exact_match = false;
     int allerrhandler_ind = -1;
     pmix_error_reg_info_t *errreg;
@@ -199,7 +199,8 @@ void pmix_errhandler_invoke(pmix_status_t status,
 pmix_status_t pmix_lookup_errhandler(pmix_notification_fn_t err,
                                      int *index)
 {
-    int i, rc = PMIX_ERR_NOT_FOUND;
+    unsigned int i;
+    pmix_status_t rc = PMIX_ERR_NOT_FOUND;
     pmix_error_reg_info_t *errreg;
     for (i = 0; i < pmix_pointer_array_get_size(&pmix_globals.errregs) ; i++) {
         errreg = (pmix_error_reg_info_t*) pmix_pointer_array_get_item (&pmix_globals.errregs, i);
@@ -216,7 +217,8 @@ pmix_status_t pmix_add_errhandler(pmix_notification_fn_t err,
                                   pmix_info_t *info, int ninfo,
                                   int *index)
 {
-    int i, rc = PMIX_SUCCESS;
+    unsigned int i;
+    pmix_status_t rc = PMIX_SUCCESS;
     pmix_error_reg_info_t *errreg = PMIX_NEW(pmix_error_reg_info_t);
     errreg->errhandler = err;
     errreg->ninfo = ninfo;

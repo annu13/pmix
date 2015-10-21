@@ -129,7 +129,6 @@ static void pmix_client_notify_recv(struct pmix_peer_t *peer, pmix_usock_hdr_t *
     pmix_errhandler_invoke(rc, NULL, 0, NULL, 0);
     PMIX_PROC_FREE(procs, nprocs);
     PMIX_INFO_FREE(info, ninfo);
-
 }
 
 
@@ -1150,13 +1149,9 @@ void pmix_client_register_errhandler(pmix_info_t info[], size_t ninfo,
         else {
             /* To do: need to determine if the client needs to process the info keys before passing it to
                server */
-            /* Check for the case we got no info objects - which implies the caller wants
-               to be notified of all supported errors, add default keys before forwarding the request to
-               server */
-            if (0 == ninfo) {
-
-            }
+            msg = PMIX_NEW(pmix_buffer_t);
             if (PMIX_SUCCESS != (rc = pack_regevents(msg, PMIX_REGEVENTS_CMD, info, ninfo))) {
+                PMIX_RELEASE(msg);
                 pmix_remove_errhandler(index);
                 cbfunc(PMIX_ERR_PACK_FAILURE, -1, cbdata);
             }
@@ -1214,11 +1209,9 @@ void pmix_client_deregister_errhandler(int errhandler_ref,
     pmix_cb_t *cb;
     errreg = (pmix_error_reg_info_t *) pmix_pointer_array_get_item (&pmix_globals.errregs, errhandler_ref);
     if (NULL != errreg ) {
-        if (0 == errreg->ninfo) {
-             pmix_remove_errhandler (errhandler_ref);
-             cbfunc(PMIX_SUCCESS, cbdata);
-        }
-        else if (PMIX_SUCCESS != (rc = pack_regevents(msg, PMIX_DEREGEVENTS_CMD, errreg->info, errreg->ninfo))) {
+        msg = PMIX_NEW(pmix_buffer_t);
+        if (PMIX_SUCCESS != (rc = pack_regevents(msg, PMIX_DEREGEVENTS_CMD, errreg->info, errreg->ninfo))) {
+            PMIX_RELEASE(msg);
             pmix_remove_errhandler(errhandler_ref);
             cbfunc(PMIX_ERR_PACK_FAILURE, cbdata);
         }
@@ -1238,11 +1231,88 @@ void pmix_client_deregister_errhandler(int errhandler_ref,
         cbfunc(PMIX_ERR_NOT_FOUND, cbdata);
 }
 
+static void notifyerror_cbfunc(struct pmix_peer_t *peer, pmix_usock_hdr_t *hdr,
+                              pmix_buffer_t *buf, void *cbdata)
+{
+    pmix_cb_t *cb = (pmix_cb_t*)cbdata;
+    pmix_status_t rc;
+    int ret, cnt;
+    pmix_output_verbose(2, pmix_globals.debug_output,
+                        "pmix: notifyerror_cbfunc  recvd");
+
+    if ((NULL == cb) || (NULL == cb->op_cbfunc)) {
+        PMIX_ERROR_LOG(PMIX_ERR_BAD_PARAM);
+        return;
+    }
+    /* unpack the status code */
+    if ((PMIX_SUCCESS != (rc = pmix_bfrop.unpack(buf, &ret, &cnt, PMIX_INT))) ||
+            (PMIX_SUCCESS != ret)) {
+        PMIX_ERROR_LOG(rc);
+
+    }
+    /* call the notify error completion callback fn.*/
+
+    pmix_output_verbose(2, pmix_globals.debug_output,
+                        "client: notified error cbfunc received status %d ",
+                        ret);
+    cb->op_cbfunc(ret, cb->cbdata);
+    PMIX_RELEASE(cb);
+}
+
 pmix_status_t pmix_client_notify_error(pmix_status_t status,
                                        pmix_proc_t procs[], size_t nprocs,
                                        pmix_proc_t error_procs[], size_t error_nprocs,
                                        pmix_info_t info[], size_t ninfo,
                                        pmix_op_cbfunc_t cbfunc, void *cbdata)
 {
-    return PMIX_ERR_NOT_IMPLEMENTED;
+    pmix_status_t rc;
+    pmix_buffer_t *msg = PMIX_NEW(pmix_buffer_t);
+    pmix_cmd_t cmd = PMIX_NOTIFY_CMD;
+    pmix_cb_t *cb;
+    /* pack the command */
+    if (PMIX_SUCCESS != (rc = pmix_bfrop.pack(msg, &cmd, 1, PMIX_CMD))) {
+        PMIX_ERROR_LOG(rc);
+        goto cleanup;
+    }
+    /* pack the status */
+    if (PMIX_SUCCESS != (rc = pmix_bfrop.pack(msg, &status, 1, PMIX_INT))) {
+        PMIX_ERROR_LOG(rc);
+        goto cleanup;
+    }
+    /* pack the error procs */
+    if (PMIX_SUCCESS != (rc = pmix_bfrop.pack(msg, &error_nprocs, 1, PMIX_SIZE))) {
+        PMIX_ERROR_LOG(rc);
+        goto cleanup;
+    }
+    if (0 < error_nprocs) {
+        if (PMIX_SUCCESS != (rc = pmix_bfrop.pack(msg, error_procs, error_nprocs, PMIX_PROC))) {
+            PMIX_ERROR_LOG(rc);
+            goto cleanup;
+        }
+    }
+    /* pack the info */
+    if (PMIX_SUCCESS != (rc = pmix_bfrop.pack(msg, &ninfo, 1, PMIX_SIZE))) {
+        PMIX_ERROR_LOG(rc);
+        goto cleanup;
+    }
+    if (0 < ninfo) {
+        if (PMIX_SUCCESS != (rc = pmix_bfrop.pack(msg, info, ninfo, PMIX_INFO))) {
+            PMIX_ERROR_LOG(rc);
+            goto cleanup;
+        }
+    }
+    /* create a callback object as we need to pass it to the
+     * recv routine so we know which callback to use when
+     * the server acks/nacks the register events request*/
+    cb = PMIX_NEW(pmix_cb_t);
+    cb->op_cbfunc = cbfunc;
+    cb->cbdata = cbdata;
+    pmix_list_append(&pmix_client_globals.pending_requests, &cb->super);
+    /* push the message into our event base to send to the server */
+    PMIX_ACTIVATE_SEND_RECV(&pmix_client_globals.myserver, msg, notifyerror_cbfunc, cb);
+    return PMIX_SUCCESS;
+  cleanup:
+    PMIX_RELEASE(msg);
+    cbfunc(rc, cbdata);
+    return rc;
 }

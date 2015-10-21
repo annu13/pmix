@@ -1400,7 +1400,7 @@ pmix_status_t pmix_server_register_events(pmix_peer_t *peer,
                              reginfo->ninfo, cbfunc, cbdata)))
     {
          /* call the callback fn with error status */
-        regevents_cbfunc(rc, cbdata);
+        cbfunc(rc, cbdata);
     }
 cleanup:
     PMIX_INFO_FREE(info, ninfo);
@@ -1443,7 +1443,7 @@ pmix_status_t pmix_server_deregister_events(pmix_peer_t *peer,
     PMIX_LIST_FOREACH_SAFE(reginfo, reginfo_next,
                             &pmix_server_globals.client_eventregs, pmix_regevents_info_t) {
         /* TO DO: For now assume there is one reginfo per peer, we need to revisit this
-           to match info keys too, inorder to multiple register events requests per process */
+           to match info keys too, inorder to support multiple event reg requests per process */
         if(reginfo->peer == peer) {
             pmix_list_remove_item (&pmix_server_globals.client_eventregs,  &reginfo->super);
             PMIX_RELEASE(reginfo);
@@ -1457,6 +1457,62 @@ cleanup:
     PMIX_INFO_FREE(info, ninfo);
     return rc;
 }
+
+pmix_status_t pmix_server_notify_error_client(pmix_peer_t *peer,
+                                              pmix_buffer_t *buf,
+                                              pmix_op_cbfunc_t cbfunc,
+                                              void *cbdata)
+{
+    int32_t cnt;
+    pmix_status_t rc, status;
+    pmix_info_t *info = NULL;
+    size_t ninfo, nprocs;
+    pmix_proc_t *procs = NULL;
+    pmix_output_verbose(2, pmix_globals.debug_output,
+                        "recvd  notify error from client");
+    /* unpack status */
+    cnt = 1;
+    if (PMIX_SUCCESS != (rc = pmix_bfrop.unpack(buf, &status, &cnt, PMIX_INT))) {
+        PMIX_ERROR_LOG(rc);
+        goto exit;
+    }
+    /* unpack procs */
+    cnt = 1;
+    if (PMIX_SUCCESS != (rc = pmix_bfrop.unpack(buf, &nprocs, &cnt, PMIX_SIZE))) {
+        PMIX_ERROR_LOG(rc);
+        goto exit;
+    }
+    if ( 0 < nprocs) {
+        PMIX_PROC_CREATE(procs, nprocs);
+        cnt = nprocs;
+        if (PMIX_SUCCESS != (rc = pmix_bfrop.unpack(buf, procs, &cnt, PMIX_PROC))) {
+            PMIX_PROC_FREE(procs, nprocs);
+            PMIX_ERROR_LOG(rc);
+            goto exit;
+        }
+    }
+    /* unpack the info keys */
+    cnt = 1;
+    if (PMIX_SUCCESS != (rc = pmix_bfrop.unpack(buf, &ninfo, &cnt, PMIX_SIZE))) {
+        PMIX_ERROR_LOG(rc);
+        goto exit;
+    }
+    if (0 < ninfo) {
+        PMIX_INFO_CREATE(info, ninfo);
+        cnt = ninfo;
+        if (PMIX_SUCCESS != (rc = pmix_bfrop.unpack(buf, info, &cnt, PMIX_INFO))) {
+            PMIX_ERROR_LOG(rc);
+            goto exit;
+        }
+    }
+    pmix_errhandler_invoke(status, procs, nprocs, info, ninfo);
+exit:
+    PMIX_PROC_FREE(procs, nprocs);
+    PMIX_INFO_FREE(info, ninfo);
+    cbfunc(rc, cbdata);
+    return rc;
+}
+
 // instance server library classes
 static void tcon(pmix_server_trkr_t *t)
 {

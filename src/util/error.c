@@ -199,7 +199,7 @@ void pmix_errhandler_invoke(pmix_status_t status,
 pmix_status_t pmix_lookup_errhandler(pmix_notification_fn_t err,
                                      int *index)
 {
-    unsigned int i;
+    int i;
     pmix_status_t rc = PMIX_ERR_NOT_FOUND;
     pmix_error_reg_info_t *errreg;
     for (i = 0; i < pmix_pointer_array_get_size(&pmix_globals.errregs) ; i++) {
@@ -217,7 +217,7 @@ pmix_status_t pmix_add_errhandler(pmix_notification_fn_t err,
                                   pmix_info_t *info, int ninfo,
                                   int *index)
 {
-    unsigned int i;
+    int i;
     pmix_status_t rc = PMIX_SUCCESS;
     pmix_error_reg_info_t *errreg = PMIX_NEW(pmix_error_reg_info_t);
     errreg->errhandler = err;

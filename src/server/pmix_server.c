@@ -910,7 +910,7 @@ pmix_status_t PMIx_server_dmodex_request(const pmix_proc_t *proc,
 
 static bool match_error_registration(pmix_regevents_info_t *reginfoptr, pmix_notify_caddy_t *cd)
 {
-    int i, j;
+    unsigned int i, j;
     char errgroup[PMIX_MAX_KEYLEN];
     pmix_info_t *info = reginfoptr->info;
     size_t ninfo = reginfoptr->ninfo;

@@ -16,6 +16,8 @@
 #include <pmix.h>
 #include <pmix_common.h>
 #include <pmix_server.h>
+#include "src/client/pmix_client_ops.h"
+#include "src/server/pmix_server_ops.h"
 #include "src/include/pmix_globals.h"
 
 void PMIx_Register_errhandler(pmix_info_t info[], size_t ninfo,
@@ -55,11 +57,11 @@ pmix_status_t PMIx_Notify_error(pmix_status_t status,
 {
     int rc;
     if(pmix_globals.server) {
-        rc = pmix_server_notify_error (status, procs[], nprocs, error_procs,
+        rc = pmix_server_notify_error (status, procs, nprocs, error_procs,
                                        error_nprocs, info, ninfo,
                                         cbfunc, cbdata);
     } else {
-        rc = pmix_client_notify_error (status, procs[], nprocs, error_procs,
+        rc = pmix_client_notify_error (status, procs, nprocs, error_procs,
                                        error_nprocs, info, ninfo,
                                        cbfunc, cbdata);
     }

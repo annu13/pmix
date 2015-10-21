@@ -921,7 +921,7 @@ static bool match_error_registration(pmix_regevents_info_t *reginfoptr, pmix_not
         // if we get a match on any key then we abort the search and return true.
         if((0 == strcmp(info[i].key, PMIX_ERROR_NAME)) && (error == info[i].value.data.int32))
             return true;
-        else if ((0 == strcmp(info[i].key, errgroup)) && (true == info[i].value.data.bool))
+        else if ((0 == strcmp(info[i].key, errgroup)) && (true == info[i].value.data.flag))
             return true;
     }
     /* search by node (error location) key  if it is specified in the notify info list*/
@@ -942,38 +942,43 @@ static void _notify_error(int sd, short args, void *cbdata)
 {
     pmix_notify_caddy_t *cd = (pmix_notify_caddy_t*)cbdata;
     pmix_status_t rc;
+    pmix_cmd_t cmd = PMIX_NOTIFY_CMD;
     int i;
     size_t j;
     pmix_peer_t *peer;
     pmix_regevents_info_t *reginfoptr;
     bool notify = false;
+    /* pack the command */
+    if (PMIX_SUCCESS != (rc = pmix_bfrop.pack(cd->buf, &cmd, 1, PMIX_CMD))) {
+        PMIX_ERROR_LOG(rc);
+        goto cleanup;
+    }
     /* pack the status */
     if (PMIX_SUCCESS != (rc = pmix_bfrop.pack(cd->buf, &cd->status, 1, PMIX_INT))) {
         PMIX_ERROR_LOG(rc);
-        return;
+        goto cleanup;
     }
-
     /* pack the error procs */
     if (PMIX_SUCCESS != (rc = pmix_bfrop.pack(cd->buf, &cd->error_nprocs, 1, PMIX_SIZE))) {
         PMIX_ERROR_LOG(rc);
-        return;
+        goto cleanup;
     }
     if (0 < cd->error_nprocs) {
         if (PMIX_SUCCESS != (rc = pmix_bfrop.pack(cd->buf, cd->error_procs, cd->error_nprocs, PMIX_PROC))) {
             PMIX_ERROR_LOG(rc);
-            return;
+            goto cleanup;
         }
     }
 
     /* pack the info */
     if (PMIX_SUCCESS != (rc = pmix_bfrop.pack(cd->buf, &cd->ninfo, 1, PMIX_SIZE))) {
         PMIX_ERROR_LOG(rc);
-        return;
+        goto cleanup;
     }
     if (0 < cd->ninfo) {
         if (PMIX_SUCCESS != (rc = pmix_bfrop.pack(cd->buf, cd->info, cd->ninfo, PMIX_INFO))) {
             PMIX_ERROR_LOG(rc);
-            return;
+            goto cleanup;
         }
     }
 
@@ -1016,13 +1021,13 @@ static void _notify_error(int sd, short args, void *cbdata)
             }
         }
     }
+  cleanup:
     /* notify the caller */
     if (NULL != cd->cbfunc) {
-        cd->cbfunc(PMIX_SUCCESS, cd->cbdata);
+        cd->cbfunc(rc, cd->cbdata);
     }
     PMIX_RELEASE(cd);
 }
-
 
 pmix_status_t pmix_server_notify_error(pmix_status_t status,
                                 pmix_proc_t procs[], size_t nprocs,
@@ -2002,6 +2007,20 @@ static void deregevents_cbfunc (pmix_status_t status, void *cbdata)
     PMIX_RELEASE(cd);
 }
 
+static void notifyerror_cbfunc (pmix_status_t status, void *cbdata)
+{
+    pmix_status_t rc;
+    pmix_server_caddy_t *cd = (pmix_server_caddy_t*) cbdata;
+    pmix_buffer_t *reply = PMIX_NEW(pmix_buffer_t);
+    pmix_output_verbose(2, pmix_globals.debug_output,
+                        "server:notifyerror_cbfunc called status = %d", status);
+    if (PMIX_SUCCESS != (rc = pmix_bfrop.pack(reply, &status, 1, PMIX_INT)))
+        PMIX_ERROR_LOG(rc);
+    // send reply
+    PMIX_SERVER_QUEUE_REPLY(cd->peer, cd->hdr.tag, reply);
+    PMIX_RELEASE(cd);
+}
+
 /* the switchyard is the primary message handling function. It's purpose
  * is to take incoming commands (packed into a buffer), unpack them,
  * and then call the corresponding host server's function to execute
@@ -2175,6 +2194,13 @@ static pmix_status_t server_switchyard(pmix_peer_t *peer, uint32_t tag,
         if (PMIX_SUCCESS != (rc = pmix_server_deregister_events(peer, buf, deregevents_cbfunc, cd))) {
             PMIX_ERROR_LOG(rc);
             PMIX_RELEASE(cd);
+        }
+        return rc;
+    }
+    if (PMIX_NOTIFY_CMD == cmd) {
+        PMIX_PEER_CADDY(cd, peer, tag);
+        if (PMIX_SUCCESS != (rc = pmix_server_notify_error_client(peer, buf, notifyerror_cbfunc, cd))) {
+            PMIX_ERROR_LOG(rc);
         }
         return rc;
     }

@@ -154,7 +154,7 @@ void pmix_errhandler_invoke(pmix_status_t status,
        which one to call for the specific error */
     int matched_errregs[PMIX_MAX_ERROR_REGISTRATIONS];
     int nmatched = 0;
-    int i,j,k;
+    unsigned int i,j,k;
     bool exact_match = false;
     int allerrhandler_ind = -1;
     pmix_error_reg_info_t *errreg;
@@ -233,7 +233,7 @@ pmix_status_t pmix_add_errhandler(pmix_notification_fn_t err,
 
 pmix_status_t pmix_remove_errhandler(int errhandler_ref)
 {
-    int i, rc = PMIX_SUCCESS;
+    int rc = PMIX_SUCCESS;
     pmix_error_reg_info_t *errreg;
     errreg = (pmix_error_reg_info_t*) pmix_pointer_array_get_item (&pmix_globals.errregs, errhandler_ref);
     if (NULL != errreg)
